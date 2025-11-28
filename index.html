@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KDS 廚房系統 (彈窗修正版)</title>
+    <title>KDS 廚房系統 (卡片定位版)</title>
     <style>
         /* --- 基礎設定 --- */
         body {
@@ -28,9 +28,9 @@
             transform: translate(-50%, -50%); display: none;
             box-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
             transition: width 0.1s, height 0.1s, background-color 0.2s; 
-            /* 移除 transform transition 以確保跟手性 */
         }
         
+        /* 鎖定狀態 (僅用於按鈕) */
         #virtual-cursor.locked {
             width: 16px; height: 16px;
             background-color: #ff0055;
@@ -38,6 +38,7 @@
             border-color: #ffcccc;
         }
 
+        /* 拖曳狀態 */
         #virtual-cursor.dragging {
             width: 40px; height: 40px;
             background-color: rgba(255, 255, 255, 0.5);
@@ -59,59 +60,72 @@
             overflow: hidden; 
             position: relative;
             cursor: grab;
+            display: flex;
+            align-items: center; /* 垂直置中 */
         }
 
         #orders-track {
             display: flex; 
             align-items: center; 
-            gap: 20px; 
-            padding: 20px 80px; 
+            gap: 40px; /* 卡片間距 */
+            padding: 0 50vw; /* 讓第一張和最後一張能置中，動態計算 */
             width: max-content; 
+            /* 關鍵：初始不設 transition，拖曳時才流暢，放開時加回 transition */
         }
 
         /* --- 訂單卡片 --- */
         .order-card {
-            min-width: 280px; height: 420px;
+            min-width: 320px; height: 480px; /* 卡片做大一點，方便看 */
             background: #fff; color: #333;
-            border-radius: 12px;
+            border-radius: 16px;
             display: flex; flex-direction: column;
             position: relative;
-            transition: transform 0.2s, box-shadow 0.2s;
-            border-top: 8px solid #ccc;
+            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s;
+            border-top: 10px solid #ccc;
             user-select: none;
+            opacity: 0.5; /* 非焦點卡片變暗 */
+            transform: scale(0.9);
         }
+        /* 焦點卡片樣式 */
+        .order-card.focused {
+            opacity: 1;
+            transform: scale(1);
+            box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+            z-index: 10;
+        }
+
         .order-card.priority-low { border-top-color: #28a745; }
         .order-card.priority-mid { border-top-color: #ffc107; }
         .order-card.priority-high { border-top-color: #dc3545; }
 
-        .order-card.magnet-target {
-            transform: translateY(-10px) scale(1.02);
-            box-shadow: 0 0 0 4px rgba(0, 255, 255, 0.5), 0 15px 30px rgba(0,0,0,0.5);
-            z-index: 10;
+        /* 卡片懸停 (不移動位置，只變亮，避免干擾捲動) */
+        .order-card.hover-highlight {
+            filter: brightness(1.1);
         }
+        
         .order-card.pressed { filter: brightness(0.9); transform: scale(0.98); }
 
-        .card-header { padding: 15px; border-bottom: 2px dashed #eee; display: flex; justify-content: space-between; align-items: center; }
-        .table-num { font-size: 26px; font-weight: bold; }
-        .timer { font-size: 16px; color: #666; font-family: monospace; }
-        .card-body { flex: 1; padding: 15px; overflow: hidden; font-size: 18px; line-height: 1.5; }
-        .item-row { display: flex; justify-content: space-between; border-bottom: 1px solid #f0f0f0; padding: 6px 0; }
-        .card-footer { padding: 15px; background: #f8f9fa; text-align: center; border-radius: 0 0 12px 12px; font-weight: bold; color: #555; }
+        .card-header { padding: 20px; border-bottom: 2px dashed #eee; display: flex; justify-content: space-between; align-items: center; }
+        .table-num { font-size: 32px; font-weight: bold; }
+        .timer { font-size: 18px; color: #666; font-family: monospace; }
+        .card-body { flex: 1; padding: 20px; overflow: hidden; font-size: 20px; line-height: 1.5; }
+        .item-row { display: flex; justify-content: space-between; border-bottom: 1px solid #f0f0f0; padding: 8px 0; }
+        .card-footer { padding: 15px; background: #f8f9fa; text-align: center; border-radius: 0 0 12px 12px; font-weight: bold; color: #555; letter-spacing: 1px;}
 
         /* --- 底部：已完成區 --- */
         #completed-dock {
-            height: 120px; background: #2a2a2a; border-top: 1px solid #444;
+            height: 100px; background: #2a2a2a; border-top: 1px solid #444;
             display: flex; align-items: center; padding: 0 20px; gap: 15px;
             overflow-x: auto; z-index: 90;
         }
         .mini-ticket {
-            min-width: 80px; height: 80px; background: #444; color: #aaa;
+            min-width: 70px; height: 70px; background: #444; color: #aaa;
             border-radius: 8px; display: flex; flex-direction: column;
             justify-content: center; align-items: center; font-size: 12px;
             border-left: 4px solid #28a745; opacity: 0.6;
         }
 
-        /* --- Modal (高層級) --- */
+        /* --- Modal --- */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85); display: none;
@@ -120,20 +134,17 @@
         .modal-card {
             width: 500px; background: white; color: #333; border-radius: 15px; overflow: hidden;
             box-shadow: 0 20px 50px rgba(0,0,0,0.8);
-            display: flex; flex-direction: column;
-            /* 讓點擊事件優先落在這裡 */
-            pointer-events: auto; 
+            display: flex; flex-direction: column; pointer-events: auto; 
         }
         .modal-items { padding: 30px; font-size: 22px; max-height: 40vh; overflow-y: auto; }
         
         .action-bar { display: flex; height: 100px; }
         
-        /* Interactive 類別: 用於 JS 偵測可點擊物件 */
         .btn-close, .btn-complete { border: none; font-size: 24px; cursor: pointer; position: relative; overflow: hidden; }
         .btn-close { flex: 1; background: #e9ecef; color: #333; }
         .btn-complete { flex: 2; background: #28a745; color: white; font-weight: bold; }
         
-        /* 磁吸樣式 */
+        /* 按鈕磁吸樣式 */
         .btn-close.magnet-target, .btn-complete.magnet-target {
             z-index: 2; box-shadow: inset 0 0 0 5px rgba(0, 255, 255, 0.8);
         }
@@ -152,7 +163,7 @@
         }
 
         .hint-overlay {
-            position: absolute; bottom: 140px; width: 100%; text-align: center;
+            position: absolute; bottom: 120px; width: 100%; text-align: center;
             color: rgba(255,255,255,0.4); font-size: 16px; pointer-events: none;
         }
     </style>
@@ -160,9 +171,9 @@
 <body>
 
     <header>
-        <div style="font-size: 24px; font-weight: bold;">🧑‍🍳 KDS 廚房系統</div>
+        <div style="font-size: 24px; font-weight: bold;">🧑‍🍳 KDS 廚房系統 (Snap View)</div>
         <div class="status-box">
-            <div id="status-text">載入中...</div>
+            <div id="status-text">初始化...</div>
             <div class="dot" id="status-dot"></div>
         </div>
     </header>
@@ -173,7 +184,7 @@
     </div>
     
     <div class="hint-overlay">
-        👌 捏合背景左右拖曳 &nbsp;|&nbsp; ⚡️ 彈窗開啟時背景鎖定
+        ✊ 抓取左右滑動切換訂單 &nbsp;|&nbsp; 👌 輕點開啟詳情
     </div>
 
     <div id="completed-dock">
@@ -189,7 +200,7 @@
             </div>
             <div class="modal-items" id="modal-content"></div>
             <div class="action-bar">
-                <button class="btn-close interactive" id="btn-cancel">返回 (輕捏)</button>
+                <button class="btn-close interactive" id="btn-cancel">返回</button>
                 <button class="btn-complete interactive" id="btn-complete">
                     <div class="btn-progress" id="btn-prog"></div>
                     <span>出餐 (長捏)</span>
@@ -209,15 +220,19 @@
         // --- 參數 ---
         const PINCH_THRESHOLD = 0.06;
         const RELEASE_THRESHOLD = 0.1;
-        const DRAG_START_THRESHOLD = 0.02; 
-        const SCROLL_SPEED_MULTIPLIER = 1.8; 
-        const CLICK_TIME_LIMIT = 500; // 放大點擊時間容忍度
+        const DRAG_START_THRESHOLD = 0.015; 
+        const CLICK_TIME_LIMIT = 300; 
         const LONG_PRESS_TIME = 800;
 
+        // 捲動參數
+        const CARD_WIDTH = 320; // 卡片寬度
+        const CARD_GAP = 40;    // 卡片間距
+        const TOTAL_ITEM_WIDTH = CARD_WIDTH + CARD_GAP;
+        
         // --- 狀態 ---
         let orders = [];
         let currentModalOrder = null;
-        let isModalActive = false; // 關鍵：彈窗鎖定狀態
+        let isModalActive = false;
 
         let smoothX = 0.5, smoothY = 0.5;
         let isPinching = false;
@@ -226,14 +241,16 @@
         let startHandX = 0;
         let startScrollLeft = 0;
         let isDragging = false;
+        let currentIndex = 0; // 目前顯示第幾張訂單 (0-based)
 
         let hoveredElement = null;
         let magnetLocked = false;
 
+        const track = document.getElementById('orders-track');
         const trackContainer = document.getElementById('orders-track-container');
 
         // --- 1. 訂單邏輯 ---
-        function generateMockOrders(count = 8) {
+        function generateMockOrders(count = 10) {
             const itemsPool = ["牛排", "義大利麵", "燉飯", "炸雞", "啤酒", "沙拉", "濃湯"];
             for (let i = 0; i < count; i++) {
                 const itemCount = Math.floor(Math.random() * 4) + 1;
@@ -249,13 +266,21 @@
                 });
             }
             renderOrders();
+            // 初始置中
+            updateTrackPosition(0, false);
         }
 
         function renderOrders() {
-            const track = document.getElementById('orders-track');
             track.innerHTML = '';
             orders.sort((a, b) => a.timestamp - b.timestamp);
-            orders.forEach(order => {
+            
+            // 設定 Padding 讓第一張卡片可以置中
+            // container width / 2 - card width / 2
+            const centerPadding = (window.innerWidth / 2) - (CARD_WIDTH / 2);
+            track.style.paddingLeft = `${centerPadding}px`;
+            track.style.paddingRight = `${centerPadding}px`;
+
+            orders.forEach((order, index) => {
                 const diffMins = (Date.now() - order.timestamp) / 60000;
                 let priorityClass = 'priority-low';
                 if (diffMins > 10) priorityClass = 'priority-mid';
@@ -265,19 +290,42 @@
                 
                 const card = document.createElement('div');
                 card.className = `order-card interactive ${priorityClass}`;
+                if (index === 0) card.classList.add('focused'); // 預設聚焦第一張
                 card.id = order.id;
+                card.dataset.index = index; // 存 index 方便計算
                 card.innerHTML = `
                     <div class="card-header"><span class="table-num">${order.table}</span><span class="timer">${order.timeStr}</span></div>
                     <div class="card-body">${itemsHtml}</div>
-                    <div class="card-footer">TAP</div>
+                    <div class="card-footer">OPEN</div>
                 `;
                 track.appendChild(card);
             });
-            // 修正寬度
-            track.style.width = `${orders.length * 300 + 100}px`; 
         }
 
-        // --- 2. MediaPipe ---
+        // --- 2. 軌道位置控制 (核心: 卡片定位) ---
+        function updateTrackPosition(index, animate = true) {
+            // 限制 index 範圍
+            if (index < 0) index = 0;
+            if (index >= orders.length) index = orders.length - 1;
+            currentIndex = index;
+
+            // 計算目標 scrollLeft
+            const targetScroll = index * TOTAL_ITEM_WIDTH;
+
+            if (animate) {
+                trackContainer.scrollTo({ left: targetScroll, behavior: 'smooth' });
+            } else {
+                trackContainer.scrollLeft = targetScroll;
+            }
+
+            // 更新卡片樣式 (聚焦效果)
+            document.querySelectorAll('.order-card').forEach((card, i) => {
+                if (i === currentIndex) card.classList.add('focused');
+                else card.classList.remove('focused');
+            });
+        }
+
+        // --- 3. MediaPipe ---
         let handLandmarker = undefined;
         async function startApp() {
             try {
@@ -299,7 +347,7 @@
         }
         startApp();
 
-        // --- 3. 主迴圈 ---
+        // --- 4. 主迴圈 ---
         async function predictWebcam() {
             const video = document.getElementById("webcam");
             let startTimeMs = performance.now();
@@ -311,22 +359,16 @@
                     const lm = results.landmarks[0];
                     const pinchDist = Math.sqrt(Math.pow(lm[8].x - lm[4].x, 2) + Math.pow(lm[8].y - lm[4].y, 2));
 
-                    // 平滑化游標
                     let x = 1 - lm[8].x; 
                     let y = lm[8].y;
-                    x = (x - 0.1) / 0.8; y = (y - 0.1) / 0.8; // 映射
+                    x = (x - 0.1) / 0.8; y = (y - 0.1) / 0.8;
                     x = Math.max(0, Math.min(1, x)); y = Math.max(0, Math.min(1, y));
                     
                     smoothX = smoothX * 0.7 + x * 0.3;
                     smoothY = smoothY * 0.7 + y * 0.3;
 
-                    // 邏輯處理
                     handleInteraction(pinchDist);
-                    
-                    // 游標渲染
                     renderCursor();
-                    
-                    // 懸停偵測 (如果在非拖曳狀態)
                     if (!isPinching) checkHover();
                     
                 } else {
@@ -336,7 +378,7 @@
             }
         }
 
-        // --- 4. 互動邏輯 (修正版) ---
+        // --- 5. 互動邏輯 (Snap Scroll) ---
         function handleInteraction(distance) {
             const elapsed = Date.now() - pinchStartTime;
 
@@ -346,39 +388,38 @@
                     isPinching = true;
                     pinchStartTime = Date.now();
                     startHandX = smoothX;
-                    startScrollLeft = trackContainer.scrollLeft;
+                    
+                    // 紀錄開始拖曳時的基準點 (以目前卡片位置為準)
+                    startScrollLeft = currentIndex * TOTAL_ITEM_WIDTH;
+                    
                     isDragging = false; 
-
-                    // 視覺回饋
                     if (hoveredElement) hoveredElement.classList.add('pressed');
                 }
 
-                // 判斷是否要進入拖曳模式
                 const deltaX = Math.abs(smoothX - startHandX);
 
-                // *** 關鍵修正：如果彈窗開啟 (isModalActive)，絕對禁止拖曳背景 ***
                 if (isModalActive) {
-                    isDragging = false; 
-                    // 在彈窗模式下，所有操作都視為潛在的點擊或長按
+                    // Modal 開啟時，禁止背景捲動
+                    isDragging = false;
                 } else {
-                    // 只有在彈窗關閉時，才允許進入拖曳模式
-                    if (!isDragging && deltaX > DRAG_START_THRESHOLD && !hoveredElement) {
+                    if (!isDragging && deltaX > DRAG_START_THRESHOLD) {
                          isDragging = true;
-                    }
-                    // 特殊情況：如果一開始按在卡片上，但手滑動很大，也轉成拖曳
-                    if (hoveredElement && deltaX > DRAG_START_THRESHOLD * 2) {
-                        isDragging = true;
-                        clearHover(); // 取消點擊意圖
+                         // 開始拖曳時，移除所有磁吸
+                         if (hoveredElement) {
+                             hoveredElement.classList.remove('pressed');
+                             hoveredElement.classList.remove('magnet-target');
+                             hoveredElement = null;
+                         }
                     }
                 }
 
-                // --- 執行動作 ---
                 if (isDragging) {
-                    // 背景捲動
-                    const moveX = (smoothX - startHandX) * window.innerWidth * SCROLL_SPEED_MULTIPLIER;
-                    trackContainer.scrollLeft = startScrollLeft - moveX;
+                    // --- 拖曳模式 (跟手) ---
+                    // 增加一點靈敏度 (Multiplier 2.5)
+                    const movePixel = (smoothX - startHandX) * window.innerWidth * 2.5;
+                    trackContainer.scrollLeft = startScrollLeft - movePixel;
                 } else {
-                    // 長按偵測 (僅針對完成按鈕)
+                    // --- 長按偵測 (Modal 內) ---
                     if (hoveredElement && hoveredElement.id === 'btn-complete') {
                         const progress = Math.min((elapsed / LONG_PRESS_TIME) * 100, 100);
                         document.getElementById('btn-prog').style.width = `${progress}%`;
@@ -392,9 +433,27 @@
             // === 放開手指 ===
             else if (distance > RELEASE_THRESHOLD) {
                 if (isPinching) {
-                    // 判定點擊
-                    // 條件：不是拖曳狀態 且 時間夠短 且 有指到東西
-                    if (!isDragging && elapsed < CLICK_TIME_LIMIT && hoveredElement) {
+                    if (isDragging) {
+                        // --- 拖曳結束：計算要 Snap 到哪一張卡片 ---
+                        // 目前的 scrollLeft
+                        const finalScrollLeft = trackContainer.scrollLeft;
+                        // 計算最接近的 index
+                        const rawIndex = finalScrollLeft / TOTAL_ITEM_WIDTH;
+                        let targetIndex = Math.round(rawIndex);
+
+                        // 慣性優化：如果手勢滑動很快，可以強制切換上一張或下一張
+                        // 這裡簡單實作：看手勢位移方向
+                        const gestureDelta = smoothX - startHandX;
+                        if (gestureDelta > 0.05) { // 往右滑 (Previous)
+                            targetIndex = Math.floor(rawIndex);
+                        } else if (gestureDelta < -0.05) { // 往左滑 (Next)
+                            targetIndex = Math.ceil(rawIndex);
+                        }
+
+                        updateTrackPosition(targetIndex, true);
+                    } 
+                    else if (elapsed < CLICK_TIME_LIMIT && hoveredElement) {
+                        // --- 點擊 ---
                         triggerAction(hoveredElement);
                     }
                     forceRelease();
@@ -410,12 +469,10 @@
             if(prog) prog.style.width = "0%";
         }
 
-        // --- 5. 懸停與游標 ---
+        // --- 6. 懸停與磁吸 ---
         function checkHover() {
             const screenX = smoothX * window.innerWidth;
             const screenY = smoothY * window.innerHeight;
-            
-            // 優先偵測 Modal (因為 z-index 高，elementFromPoint 會自動處理)
             const el = document.elementFromPoint(screenX, screenY);
             if (!el) return;
             
@@ -424,20 +481,20 @@
             if (interactiveEl !== hoveredElement) {
                 clearHover();
                 if (interactiveEl) {
-                    // 磁吸判斷：如果是 Modal 開啟中，我們只吸附 Modal 內的按鈕
-                    // 如果 Modal 關閉，我們吸附卡片
                     if (isModalActive) {
-                        // 確保只吸附 modal 內的元素
+                        // Modal 模式：只吸附按鈕
                         if (document.getElementById('order-modal').contains(interactiveEl)) {
                             interactiveEl.classList.add('magnet-target');
                             hoveredElement = interactiveEl;
                             magnetLocked = true;
                         }
                     } else {
-                        // 背景模式
-                        interactiveEl.classList.add('magnet-target');
-                        hoveredElement = interactiveEl;
-                        magnetLocked = true;
+                        // 背景模式：訂單卡片「不吸附」，只變亮 (hover-highlight)
+                        if (interactiveEl.classList.contains('order-card')) {
+                            interactiveEl.classList.add('hover-highlight');
+                            hoveredElement = interactiveEl;
+                            magnetLocked = false; // 關鍵：不鎖定游標位置
+                        }
                     }
                 }
             }
@@ -446,6 +503,7 @@
         function clearHover() {
             if (hoveredElement) {
                 hoveredElement.classList.remove('magnet-target');
+                hoveredElement.classList.remove('hover-highlight');
                 hoveredElement.classList.remove('pressed');
                 hoveredElement = null;
             }
@@ -473,46 +531,45 @@
             cursor.style.top = `${displayY}px`;
         }
 
-        // --- 6. 業務邏輯 ---
+        // --- 7. 業務邏輯 ---
         function triggerAction(el) {
             const id = el.id;
-
             if (el.classList.contains('order-card')) {
+                // 只有點擊當前聚焦的卡片才有效，或者點擊任意卡片都會自動捲過去？
+                // 這裡設計：點擊即開啟
                 openModal(id);
             } 
-            else if (id === 'btn-cancel') {
-                closeModal();
-            }
-            else if (id === 'btn-complete') {
-                completeOrder();
-            }
+            else if (id === 'btn-cancel') closeModal();
+            else if (id === 'btn-complete') completeOrder();
             
-            // 點擊動畫
             el.style.transform = "scale(0.95)";
             setTimeout(() => el.style.transform = "", 150);
         }
 
         function openModal(id) {
+            const targetIndex = orders.findIndex(o => o.id === id);
+            // 如果點選的不是當前中間的，先捲過去，不開啟
+            if (targetIndex !== currentIndex) {
+                updateTrackPosition(targetIndex, true);
+                return;
+            }
+
             currentModalOrder = orders.find(o => o.id === id);
             if (!currentModalOrder) return;
             
-            // 填充資料
             document.getElementById('modal-title').innerText = `Table ${currentModalOrder.table}`;
             document.getElementById('modal-time').innerText = currentModalOrder.timeStr;
             const content = document.getElementById('modal-content');
             content.innerHTML = currentModalOrder.items.map(it => `<div class="item-row"><span>${it.name}</span><span>${it.qty}</span></div>`).join('');
 
-            // 開啟 Modal 並設定鎖定狀態
             document.getElementById('order-modal').style.display = 'flex';
             isModalActive = true; 
-            
-            // 重置狀態以防萬一
             forceRelease();
         }
 
         function closeModal() {
             document.getElementById('order-modal').style.display = 'none';
-            isModalActive = false; // 解除鎖定，允許捲動
+            isModalActive = false;
             currentModalOrder = null;
             clearHover();
         }
@@ -520,9 +577,8 @@
         function completeOrder() {
             if (!currentModalOrder) return;
             const orderId = currentModalOrder.id;
-            closeModal(); // 這裡會順便把 isModalActive 設為 false
+            closeModal();
 
-            // 動畫
             const card = document.getElementById(orderId);
             if (card) {
                 const rect = card.getBoundingClientRect();
@@ -547,6 +603,10 @@
                 card.style.opacity = '0';
                 setTimeout(() => {
                     renderOrders();
+                    // 移除後，重新對齊當前 index (如果有變動)
+                    if (currentIndex >= orders.length) currentIndex = orders.length - 1;
+                    updateTrackPosition(currentIndex, false);
+                    
                     flyer.remove();
                     const mini = document.createElement('div');
                     mini.className = 'mini-ticket';
