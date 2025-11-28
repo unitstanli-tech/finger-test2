@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KDS 隔空出餐系統</title>
+    <style>
+        /* --- 基礎設定 --- */
+        body {
+            font-family: 'Segoe UI', 'Roboto', Helvetica, Arial, sans-serif;
+            margin: 0; padding: 0;
+            background-color: #222; /* 深色模式，保護廚師眼睛 */
+            color: white;
+            display: flex; flex-direction: column;
+            height: 100vh; overflow: hidden;
+            cursor: none; user-select: none;
+        }
+
+        #webcam-container { position: fixed; opacity: 0; pointer-events: none; z-index: -1; }
+
+        /* --- 虛擬游標 --- */
+        #virtual-cursor {
+            position: fixed; top: 50%; left: 50%;
+            width: 28px; height: 28px;
+            background-color: rgba(0, 255, 255, 0.8); /* 青色游標在深色底比較明顯 */
+            border: 3px solid white; border-radius: 50%;
+            pointer-events: none; z-index: 9999;
+            transform: translate(-50%, -50%); display: none;
+            box-shadow: 0 0 15px rgba(0, 255, 255, 0.6);
+            transition: width 0.1s, height 0.1s, background-color 0.2s; 
+        }
+        #virtual-cursor.locked {
+            background-color: #ff0055; width: 20px; height: 20px; box-shadow: 0 0 20px #ff0055;
+            border-color: #ffcccc;
+        }
+        #virtual-cursor.scroll-mode {
+            background-color: white; width: 40px; height: 40px; opacity: 0.5; border: none;
+        }
+
+        /* --- 頂部狀態列 --- */
+        header {
+            height: 60px; background: #333; display: flex; align-items: center; justify-content: space-between; padding: 0 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5); z-index: 100;
+        }
+        .status-box { display: flex; align-items: center; gap: 10px; }
+        .dot { width: 12px; height: 12px; background: #555; border-radius: 50%; }
+        .dot.active { background: #0f0; box-shadow: 0 0 10px #0f0; }
+        .pinch-indicator { width: 0%; height: 6px; background: #ff0055; border-radius: 3px; transition: width 0.05s linear; }
+        
+        /* --- 主畫面：待辦訂單區 (橫向捲動) --- */
+        #orders-track {
+            flex: 1; 
+            display: flex; 
+            align-items: center; 
+            gap: 20px; 
+            padding: 20px 80px; /* 左右留白給捲動熱區 */
+            overflow-x: auto; 
+            overflow-y: hidden;
+            scroll-behavior: smooth;
+        }
+        /* 隱藏捲軸 */
+        #orders-track::-webkit-scrollbar { display: none; }
+
+        /* --- 訂單卡片 --- */
+        .order-card {
+            min-width: 260px; height: 380px;
+            background: #fff; color: #333;
+            border-radius: 12px;
+            display: flex; flex-direction: column;
+            position: relative;
+            transition: transform 0.2s, box-shadow 0.2s;
+            border-top: 8px solid #ccc; /* 狀態條 */
+        }
+        .order-card.priority-low { border-top-color: #28a745; }   /* 綠: 新單 */
+        .order-card.priority-mid { border-top-color: #ffc107; }   /* 黃: 等稍久 */
+        .order-card.priority-high { border-top-color: #dc3545; }  /* 紅: 急單 */
+
+        .order-card.hovered {
+            transform: translateY(-10px) scale(1.02);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.5);
+            z-index: 10;
+        }
+        .order-card.active { transform: scale(0.95); background: #e9ecef; }
+
+        .card-header { padding: 15px; border-bottom: 2px dashed #eee; display: flex; justify-content: space-between; align-items: center; }
+        .table-num { font-size: 24px; font-weight: bold; }
+        .timer { font-size: 14px; color: #666; font-family: monospace; }
+        
+        .card-body { flex: 1; padding: 15px; overflow-y: hidden; font-size: 18px; line-height: 1.6; }
+        .item-row { display: flex; justify-content: space-between; border-bottom: 1px solid #f0f0f0; padding: 5px 0; }
+        .card-footer { padding: 15px; background: #f8f9fa; text-align: center; border-radius: 0 0 12px 12px; font-weight: bold; color: #555; }
+
+        /* --- 底部：已完成區 --- */
+        #completed-dock {
+            height: 120px; background: #2a2a2a; border-top: 1px solid #444;
+            display: flex; align-items: center; padding: 0 20px; gap: 15px;
+            overflow-x: auto;
+        }
+        .mini-ticket {
+            min-width: 80px; height: 80px; background: #444; color: #aaa;
+            border-radius: 8px; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; font-size: 12px;
+            border-left: 4px solid #28a745; opacity: 0.6;
+        }
+
+        /* --- 捲動熱區 (Hot Zones) --- */
+        .scroll-zone {
+            position: fixed; top: 60px; bottom: 120px; width: 80px; z-index: 50;
+            display: flex; justify-content: center; align-items: center;
+            font-size: 40px; color: rgba(255,255,255,0.3);
+            background: linear-gradient(90deg, rgba(0,0,0,0.5), transparent);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .scroll-zone.left { left: 0; }
+        .scroll-zone.right { right: 0; background: linear-gradient(-90deg, rgba(0,0,0,0.5), transparent); }
+        .scroll-zone.active { opacity: 1; color: white; }
+
+        /* --- Modal 詳情與完成 --- */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: none;
+            justify-content: center; align-items: center; z-index: 2000;
+        }
+        .modal-card {
+            width: 500px; background: white; color: #333; border-radius: 15px; overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+            display: flex; flex-direction: column;
+        }
+        .modal-items { padding: 30px; font-size: 22px; max-height: 40vh; overflow-y: auto; }
+        .modal-item-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        
+        .action-bar { display: flex; height: 100px; }
+        .btn-close { flex: 1; background: #e9ecef; border: none; font-size: 24px; color: #333; }
+        .btn-complete { flex: 2; background: #28a745; border: none; font-size: 28px; color: white; font-weight: bold; position: relative; overflow: hidden; }
+        
+        /* 完成按鈕的進度條背景 */
+        .btn-progress {
+            position: absolute; left: 0; top: 0; bottom: 0; width: 0%; 
+            background: rgba(0,0,0,0.2); transition: width 0.05s linear; pointer-events: none;
+        }
+        .btn-complete.hovered { filter: brightness(1.1); }
+        .btn-close.hovered { background: #d3d9df; }
+
+        /* 出餐動畫 */
+        .flying-ticket {
+            position: fixed; z-index: 5000; background: white; 
+            border: 2px solid #28a745; border-radius: 10px;
+            transition: all 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 20px; color: #28a745;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div style="font-size: 24px; font-weight: bold;">🧑‍🍳 KDS 廚房顯示系統</div>
+        <div class="status-box">
+            <div style="width: 100px; background: #555; height: 8px; border-radius: 4px; overflow:hidden;">
+                <div class="pinch-indicator" id="pinch-bar"></div>
+            </div>
+            <div id="status-text">系統啟動中...</div>
+            <div class="dot" id="status-dot"></div>
+        </div>
+    </header>
+
+    <!-- 左右捲動熱區 -->
+    <div class="scroll-zone left" id="zone-left">❮</div>
+    <div class="scroll-zone right" id="zone-right">❯</div>
+
+    <!-- 待辦訂單軌道 -->
+    <div id="orders-track">
+        <!-- JS 動態生成 -->
+    </div>
+
+    <!-- 底部已完成區 -->
+    <div id="completed-dock">
+        <div style="color: #666; font-style: italic;">已完成訂單區</div>
+    </div>
+
+    <!-- 詳情 Modal -->
+    <div class="modal-overlay" id="order-modal">
+        <div class="modal-card">
+            <div class="card-header" style="background: #f8f9fa;">
+                <span class="table-num" id="modal-title">桌號 01</span>
+                <span class="timer" id="modal-time">12:30</span>
+            </div>
+            <div class="modal-items" id="modal-content"></div>
+            <div class="action-bar">
+                <button class="btn-close interactive" id="btn-cancel">返回</button>
+                <button class="btn-complete interactive" id="btn-complete">
+                    <div class="btn-progress" id="btn-prog"></div>
+                    <span style="position:relative; z-index:2;">長捏出餐</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="webcam-container">
+        <video id="webcam" autoplay playsinline></video>
+    </div>
+
+    <div id="virtual-cursor"></div>
+
+    <script type="module">
+        import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
+
+        // --- 設定與狀態 ---
+        const SCROLL_SPEED = 15;        // 捲動速度
+        const EDGE_THRESHOLD = 0.15;    // 螢幕邊緣 15% 觸發捲動
+        const PINCH_THRESHOLD = 0.06;   // 捏合距離
+        const LOCK_THRESHOLD = 0.1;     // 鎖定距離
+        const HOLD_TIME = 600;          // 出餐確認需要捏住的時間 (ms)
+
+        let orders = [];
+        let completedOrders = [];
+        let currentModalOrder = null;
+
+        // 手勢狀態
+        let smoothX = 0.5, smoothY = 0.5;
+        let isCursorLocked = false;
+        let pinchStartTime = 0;
+        let hoveredElement = null;
+        let pinchTriggered = false;
+        let isInputPaused = false;
+        let scrollInterval = null;
+
+        // --- 1. 模擬訂單資料產生器 ---
+        function generateMockOrders(count = 5) {
+            const itemsPool = ["凱薩沙拉", "蘑菇濃湯", "紐約客牛排", "松露燉飯", "炸魚薯條", "可樂", "熱美式", "提拉米蘇"];
+            for (let i = 0; i < count; i++) {
+                const itemCount = Math.floor(Math.random() * 4) + 1;
+                const items = [];
+                for(let j=0; j<itemCount; j++) {
+                    items.push({ name: itemsPool[Math.floor(Math.random() * itemsPool.length)], qty: 1 });
+                }
+                
+                // 模擬時間 (過去 5~30 分鐘)
+                const minutesAgo = Math.floor(Math.random() * 25) + 1;
+                const date = new Date(Date.now() - minutesAgo * 60000);
+                const timeStr = `${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}`;
+
+                orders.push({
+                    id: `ord-${Date.now()}-${i}`,
+                    table: Math.floor(Math.random() * 20) + 1,
+                    timeStr: timeStr,
+                    timestamp: date.getTime(),
+                    items: items,
+                    status: 'pending'
+                });
+            }
+            renderOrders();
+        }
+
+        function renderOrders() {
+            const track = document.getElementById('orders-track');
+            track.innerHTML = '';
+            
+            // 排序：越早的單越前面 (FIFO)
+            orders.sort((a, b) => a.timestamp - b.timestamp);
+
+            orders.forEach(order => {
+                const now = Date.now();
+                const diffMins = (now - order.timestamp) / 60000;
+                let priorityClass = 'priority-low';
+                if (diffMins > 10) priorityClass = 'priority-mid';
+                if (diffMins > 20) priorityClass = 'priority-high';
+
+                const card = document.createElement('div');
+                card.className = `order-card interactive ${priorityClass}`;
+                card.id = order.id;
+                
+                let itemsHtml = order.items.map(it => 
+                    `<div class="item-row"><span>${it.name}</span><span>x${it.qty}</span></div>`
+                ).join('');
+
+                card.innerHTML = `
+                    <div class="card-header">
+                        <span class="table-num">Table ${order.table}</span>
+                        <span class="timer">${order.timeStr}</span>
+                    </div>
+                    <div class="card-body">${itemsHtml}</div>
+                    <div class="card-footer">捏合查看詳情</div>
+                `;
+                track.appendChild(card);
+            });
+
+            // 補一個空白佔位，讓最後一張卡片能推到中間
+            const spacer = document.createElement('div');
+            spacer.style.minWidth = "50vw"; 
+            track.appendChild(spacer);
+        }
+
+        // --- 2. MediaPipe 初始化 ---
+        let handLandmarker = undefined;
+        async function startApp() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
+                handLandmarker = await HandLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numHands: 1
+                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                const video = document.getElementById("webcam");
+                video.srcObject = stream;
+                video.addEventListener("loadeddata", () => {
+                    document.getElementById("status-dot").classList.add("active");
+                    document.getElementById("status-text").innerText = "系統就緒 (請用手勢操作)";
+                    generateMockOrders(6); // 初始產生訂單
+                    predictWebcam();
+                });
+            } catch (err) {
+                console.error(err);
+                alert("無法啟動：請檢查攝影機");
+            }
+        }
+        startApp();
+
+        // --- 3. 核心偵測 ---
+        async function predictWebcam() {
+            const video = document.getElementById("webcam");
+            let startTimeMs = performance.now();
+            window.requestAnimationFrame(predictWebcam);
+
+            if (handLandmarker && video.currentTime > 0) {
+                const results = handLandmarker.detectForVideo(video, startTimeMs);
+
+                if (results.landmarks.length > 0) {
+                    const lm = results.landmarks[0];
+                    const pinchDist = Math.sqrt(Math.pow(lm[8].x - lm[4].x, 2) + Math.pow(lm[8].y - lm[4].y, 2));
+
+                    // A. 鎖定判斷
+                    if (pinchDist < LOCK_THRESHOLD || pinchStartTime > 0) {
+                        isCursorLocked = true;
+                    } else {
+                        isCursorLocked = false;
+                        if(hoveredElement && hoveredElement.classList.contains('magnet-locked')) {
+                            hoveredElement.classList.remove('magnet-locked');
+                        }
+                    }
+
+                    // B. 更新游標
+                    updateCursor(lm[8].x, lm[8].y, isCursorLocked);
+
+                    // C. 邊緣捲動邏輯 (Edge Scrolling)
+                    handleEdgeScroll(smoothX);
+
+                    // D. 互動邏輯 (只有沒暫停時)
+                    if (!isInputPaused) {
+                        if (!isCursorLocked) checkHover();
+                        processPinch(pinchDist);
+                    } else {
+                        // 暫停時只重置 UI
+                        document.getElementById('pinch-bar').style.width = "0%";
+                        const btnProg = document.getElementById('btn-prog');
+                        if(btnProg) btnProg.style.width = "0%";
+                    }
+                } else {
+                    document.getElementById('virtual-cursor').style.display = 'none';
+                    stopEdgeScroll();
+                    clearHover();
+                }
+            }
+        }
+
+        // --- 4. 游標與捲動 ---
+        function updateCursor(rawX, rawY, locked) {
+            const cursor = document.getElementById('virtual-cursor');
+            
+            // 鏡像翻轉與平滑
+            let x = 1 - rawX;
+            let y = rawY;
+            // 稍微放大映射範圍，比較好碰到邊緣
+            x = (x - 0.1) / 0.8; 
+            y = (y - 0.1) / 0.8;
+            x = Math.max(0, Math.min(1, x));
+            y = Math.max(0, Math.min(1, y));
+
+            smoothX = smoothX * 0.8 + x * 0.2;
+            smoothY = smoothY * 0.8 + y * 0.2;
+
+            cursor.style.display = 'block';
+            
+            if (locked) {
+                cursor.classList.add('locked');
+                // 磁吸
+                if (hoveredElement && !isInputPaused) {
+                    const rect = hoveredElement.getBoundingClientRect();
+                    cursor.style.left = `${rect.left + rect.width/2}px`;
+                    cursor.style.top = `${rect.top + rect.height/2}px`;
+                    hoveredElement.classList.add('magnet-locked');
+                    return;
+                }
+            } else {
+                cursor.classList.remove('locked');
+            }
+
+            cursor.style.left = `${smoothX * window.innerWidth}px`;
+            cursor.style.top = `${smoothY * window.innerHeight}px`;
+        }
+
+        function handleEdgeScroll(xRatio) {
+            const track = document.getElementById('orders-track');
+            const leftZone = document.getElementById('zone-left');
+            const rightZone = document.getElementById('zone-right');
+
+            // 如果 Modal 打開中，禁止背景捲動
+            if (document.getElementById('order-modal').style.display === 'flex') {
+                stopEdgeScroll();
+                return;
+            }
+
+            if (xRatio < EDGE_THRESHOLD) {
+                // 向左捲
+                leftZone.classList.add('active');
+                rightZone.classList.remove('active');
+                if (!scrollInterval) {
+                    scrollInterval = setInterval(() => { track.scrollLeft -= SCROLL_SPEED; }, 16);
+                }
+            } else if (xRatio > (1 - EDGE_THRESHOLD)) {
+                // 向右捲
+                rightZone.classList.add('active');
+                leftZone.classList.remove('active');
+                if (!scrollInterval) {
+                    scrollInterval = setInterval(() => { track.scrollLeft += SCROLL_SPEED; }, 16);
+                }
+            } else {
+                stopEdgeScroll();
+            }
+        }
+
+        function stopEdgeScroll() {
+            if (scrollInterval) {
+                clearInterval(scrollInterval);
+                scrollInterval = null;
+            }
+            document.getElementById('zone-left').classList.remove('active');
+            document.getElementById('zone-right').classList.remove('active');
+        }
+
+        function checkHover() {
+            const cursor = document.getElementById('virtual-cursor');
+            const rect = cursor.getBoundingClientRect();
+            const el = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
+            if (!el) return;
+            const interactiveEl = el.closest('.interactive');
+
+            if (interactiveEl !== hoveredElement) {
+                clearHover();
+                if (interactiveEl) {
+                    interactiveEl.classList.add('hovered');
+                    hoveredElement = interactiveEl;
+                }
+            }
+        }
+
+        function clearHover() {
+            if (hoveredElement) {
+                hoveredElement.classList.remove('hovered');
+                hoveredElement.classList.remove('magnet-locked');
+                hoveredElement = null;
+            }
+        }
+
+        // --- 5. 互動邏輯 ---
+        function processPinch(distance) {
+            // 進度條控制
+            const mainBar = document.getElementById('pinch-bar');
+            const btnProg = document.getElementById('btn-prog'); // 完成按鈕專用的進度條
+
+            if (distance < PINCH_THRESHOLD) {
+                if (pinchTriggered) return;
+                if (pinchStartTime === 0) pinchStartTime = Date.now();
+
+            
