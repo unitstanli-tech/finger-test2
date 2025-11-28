@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KDS 廚房顯示系統 (通用抓取版)</title>
+    <title>KDS 廚房系統 (彈窗修正版)</title>
     <style>
         /* --- 基礎設定 --- */
         body {
@@ -22,16 +22,15 @@
         #virtual-cursor {
             position: fixed; top: 50%; left: 50%;
             width: 24px; height: 24px;
-            background-color: rgba(0, 255, 255, 0.8);
+            background-color: rgba(0, 255, 255, 0.9);
             border: 3px solid white; border-radius: 50%;
             pointer-events: none; z-index: 10000;
             transform: translate(-50%, -50%); display: none;
             box-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
-            transition: width 0.1s, height 0.1s, background-color 0.2s;
-            /* 移除 transform transition 以免拖曳時有延遲感，改由 JS 控制位置 */
+            transition: width 0.1s, height 0.1s, background-color 0.2s; 
+            /* 移除 transform transition 以確保跟手性 */
         }
         
-        /* 磁吸狀態 */
         #virtual-cursor.locked {
             width: 16px; height: 16px;
             background-color: #ff0055;
@@ -39,7 +38,6 @@
             border-color: #ffcccc;
         }
 
-        /* 拖曳狀態 */
         #virtual-cursor.dragging {
             width: 40px; height: 40px;
             background-color: rgba(255, 255, 255, 0.5);
@@ -69,7 +67,6 @@
             gap: 20px; 
             padding: 20px 80px; 
             width: max-content; 
-            /* 移除 transition，讓拖曳完全跟手 */
         }
 
         /* --- 訂單卡片 --- */
@@ -87,13 +84,11 @@
         .order-card.priority-mid { border-top-color: #ffc107; }
         .order-card.priority-high { border-top-color: #dc3545; }
 
-        /* 磁吸時的卡片效果 */
         .order-card.magnet-target {
             transform: translateY(-10px) scale(1.02);
             box-shadow: 0 0 0 4px rgba(0, 255, 255, 0.5), 0 15px 30px rgba(0,0,0,0.5);
             z-index: 10;
         }
-        
         .order-card.pressed { filter: brightness(0.9); transform: scale(0.98); }
 
         .card-header { padding: 15px; border-bottom: 2px dashed #eee; display: flex; justify-content: space-between; align-items: center; }
@@ -116,7 +111,7 @@
             border-left: 4px solid #28a745; opacity: 0.6;
         }
 
-        /* --- Modal (層級必須夠高) --- */
+        /* --- Modal (高層級) --- */
         .modal-overlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(0,0,0,0.85); display: none;
@@ -126,23 +121,28 @@
             width: 500px; background: white; color: #333; border-radius: 15px; overflow: hidden;
             box-shadow: 0 20px 50px rgba(0,0,0,0.8);
             display: flex; flex-direction: column;
+            /* 讓點擊事件優先落在這裡 */
+            pointer-events: auto; 
         }
         .modal-items { padding: 30px; font-size: 22px; max-height: 40vh; overflow-y: auto; }
         
         .action-bar { display: flex; height: 100px; }
-        .btn-close { flex: 1; background: #e9ecef; border: none; font-size: 24px; color: #333; }
-        .btn-complete { flex: 2; background: #28a745; border: none; font-size: 28px; color: white; font-weight: bold; position: relative; overflow: hidden; }
         
-        /* 磁吸按鈕效果 */
+        /* Interactive 類別: 用於 JS 偵測可點擊物件 */
+        .btn-close, .btn-complete { border: none; font-size: 24px; cursor: pointer; position: relative; overflow: hidden; }
+        .btn-close { flex: 1; background: #e9ecef; color: #333; }
+        .btn-complete { flex: 2; background: #28a745; color: white; font-weight: bold; }
+        
+        /* 磁吸樣式 */
         .btn-close.magnet-target, .btn-complete.magnet-target {
-            z-index: 1; box-shadow: inset 0 0 0 4px rgba(0, 255, 255, 0.8); transform: scale(1.05);
+            z-index: 2; box-shadow: inset 0 0 0 5px rgba(0, 255, 255, 0.8);
         }
-
+        
         .btn-progress {
             position: absolute; left: 0; top: 0; bottom: 0; width: 0%; 
             background: rgba(0,0,0,0.2); transition: width 0.05s linear; pointer-events: none;
         }
-
+        
         /* 出餐動畫 */
         .flying-ticket {
             position: fixed; z-index: 5000; background: white; 
@@ -151,7 +151,6 @@
             display: flex; justify-content: center; align-items: center; font-weight: bold; font-size: 20px; color: #28a745;
         }
 
-        /* 提示字 */
         .hint-overlay {
             position: absolute; bottom: 140px; width: 100%; text-align: center;
             color: rgba(255,255,255,0.4); font-size: 16px; pointer-events: none;
@@ -163,21 +162,20 @@
     <header>
         <div style="font-size: 24px; font-weight: bold;">🧑‍🍳 KDS 廚房系統</div>
         <div class="status-box">
-            <div id="status-text">系統啟動中...</div>
+            <div id="status-text">載入中...</div>
             <div class="dot" id="status-dot"></div>
         </div>
     </header>
 
-    <!-- 訂單軌道 -->
+    <!-- 背景訂單區 -->
     <div id="orders-track-container">
         <div id="orders-track"></div>
     </div>
     
     <div class="hint-overlay">
-        👌 任意位置捏合拖曳可捲動 &nbsp;|&nbsp; ⚡️ 磁力吸附輔助點選
+        👌 捏合背景左右拖曳 &nbsp;|&nbsp; ⚡️ 彈窗開啟時背景鎖定
     </div>
 
-    <!-- 底部已完成 -->
     <div id="completed-dock">
         <div style="color: #666; font-style: italic; padding-left:10px;">已完成區</div>
     </div>
@@ -191,10 +189,10 @@
             </div>
             <div class="modal-items" id="modal-content"></div>
             <div class="action-bar">
-                <button class="btn-close interactive" id="btn-cancel">返回</button>
+                <button class="btn-close interactive" id="btn-cancel">返回 (輕捏)</button>
                 <button class="btn-complete interactive" id="btn-complete">
                     <div class="btn-progress" id="btn-prog"></div>
-                    <span>長捏出餐</span>
+                    <span>出餐 (長捏)</span>
                 </button>
             </div>
         </div>
@@ -203,54 +201,49 @@
     <div id="webcam-container">
         <video id="webcam" autoplay playsinline></video>
     </div>
-
     <div id="virtual-cursor"></div>
 
     <script type="module">
         import { FilesetResolver, HandLandmarker } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js";
 
-        // --- 參數調整 ---
+        // --- 參數 ---
         const PINCH_THRESHOLD = 0.06;
         const RELEASE_THRESHOLD = 0.1;
-        const DRAG_START_THRESHOLD = 0.02; // 手移動超過 2% 螢幕寬度才算拖曳 (防手抖)
-        const SCROLL_SPEED_MULTIPLIER = 1.8; // 拖曳速度加成
-        const CLICK_TIME_LIMIT = 400;      // 小於 400ms 算點擊
-        const LONG_PRESS_TIME = 800;       // 長按時間
+        const DRAG_START_THRESHOLD = 0.02; 
+        const SCROLL_SPEED_MULTIPLIER = 1.8; 
+        const CLICK_TIME_LIMIT = 500; // 放大點擊時間容忍度
+        const LONG_PRESS_TIME = 800;
 
-        // --- 狀態變數 ---
+        // --- 狀態 ---
         let orders = [];
         let currentModalOrder = null;
+        let isModalActive = false; // 關鍵：彈窗鎖定狀態
 
         let smoothX = 0.5, smoothY = 0.5;
         let isPinching = false;
         let pinchStartTime = 0;
         
-        // 拖曳相關
-        let startHandX = 0;        // 捏合時的手部 X
-        let startScrollLeft = 0;   // 捏合時的捲軸位置
-        let isDragging = false;    // 是否已進入拖曳模式
+        let startHandX = 0;
+        let startScrollLeft = 0;
+        let isDragging = false;
 
-        // 磁吸相關
-        let hoveredElement = null; // 當前游標下的互動元件
-        let magnetLocked = false;  // 是否處於磁吸狀態
+        let hoveredElement = null;
+        let magnetLocked = false;
 
         const trackContainer = document.getElementById('orders-track-container');
 
-        // --- 1. 生成訂單 ---
+        // --- 1. 訂單邏輯 ---
         function generateMockOrders(count = 8) {
             const itemsPool = ["牛排", "義大利麵", "燉飯", "炸雞", "啤酒", "沙拉", "濃湯"];
             for (let i = 0; i < count; i++) {
                 const itemCount = Math.floor(Math.random() * 4) + 1;
                 const items = [];
                 for(let j=0; j<itemCount; j++) items.push({ name: itemsPool[Math.floor(Math.random() * itemsPool.length)], qty: 1 });
-                
                 const date = new Date(Date.now() - Math.floor(Math.random() * 30) * 60000);
-                const timeStr = `${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}`;
-
                 orders.push({
                     id: `ord-${Date.now()}-${i}`,
                     table: Math.floor(Math.random() * 20) + 1,
-                    timeStr: timeStr,
+                    timeStr: `${date.getHours()}:${date.getMinutes().toString().padStart(2,'0')}`,
                     timestamp: date.getTime(),
                     items: items,
                 });
@@ -262,26 +255,26 @@
             const track = document.getElementById('orders-track');
             track.innerHTML = '';
             orders.sort((a, b) => a.timestamp - b.timestamp);
-
             orders.forEach(order => {
                 const diffMins = (Date.now() - order.timestamp) / 60000;
                 let priorityClass = 'priority-low';
                 if (diffMins > 10) priorityClass = 'priority-mid';
                 if (diffMins > 20) priorityClass = 'priority-high';
-
+                
+                let itemsHtml = order.items.map(it => `<div class="item-row"><span>${it.name}</span><span>x${it.qty}</span></div>`).join('');
+                
                 const card = document.createElement('div');
                 card.className = `order-card interactive ${priorityClass}`;
                 card.id = order.id;
-                
-                let itemsHtml = order.items.map(it => `<div class="item-row"><span>${it.name}</span><span>x${it.qty}</span></div>`).join('');
-
                 card.innerHTML = `
                     <div class="card-header"><span class="table-num">${order.table}</span><span class="timer">${order.timeStr}</span></div>
                     <div class="card-body">${itemsHtml}</div>
-                    <div class="card-footer">TAP TO OPEN</div>
+                    <div class="card-footer">TAP</div>
                 `;
                 track.appendChild(card);
             });
+            // 修正寬度
+            track.style.width = `${orders.length * 300 + 100}px`; 
         }
 
         // --- 2. MediaPipe ---
@@ -290,27 +283,23 @@
             try {
                 const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm");
                 handLandmarker = await HandLandmarker.createFromOptions(vision, {
-                    baseOptions: {
-                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-                        delegate: "GPU"
-                    },
-                    runningMode: "VIDEO",
-                    numHands: 1
+                    baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" },
+                    runningMode: "VIDEO", numHands: 1
                 });
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
                 const video = document.getElementById("webcam");
                 video.srcObject = stream;
                 video.addEventListener("loadeddata", () => {
                     document.getElementById("status-dot").classList.add("active");
-                    document.getElementById("status-text").innerText = "Air Mouse Ready";
+                    document.getElementById("status-text").innerText = "Ready";
                     generateMockOrders();
                     predictWebcam();
                 });
-            } catch (err) { alert("相機啟動失敗"); }
+            } catch (err) { alert("Camera Error"); }
         }
         startApp();
 
-        // --- 3. 核心迴圈 ---
+        // --- 3. 主迴圈 ---
         async function predictWebcam() {
             const video = document.getElementById("webcam");
             let startTimeMs = performance.now();
@@ -322,14 +311,24 @@
                     const lm = results.landmarks[0];
                     const pinchDist = Math.sqrt(Math.pow(lm[8].x - lm[4].x, 2) + Math.pow(lm[8].y - lm[4].y, 2));
 
-                    // 1. 計算平滑座標
-                    calculateSmoothCursor(lm[8].x, lm[8].y);
+                    // 平滑化游標
+                    let x = 1 - lm[8].x; 
+                    let y = lm[8].y;
+                    x = (x - 0.1) / 0.8; y = (y - 0.1) / 0.8; // 映射
+                    x = Math.max(0, Math.min(1, x)); y = Math.max(0, Math.min(1, y));
+                    
+                    smoothX = smoothX * 0.7 + x * 0.3;
+                    smoothY = smoothY * 0.7 + y * 0.3;
 
-                    // 2. 處理互動邏輯 (核心)
-                    handleGestureLogic(pinchDist);
-
-                    // 3. 渲染游標 (最後才畫，確保狀態正確)
+                    // 邏輯處理
+                    handleInteraction(pinchDist);
+                    
+                    // 游標渲染
                     renderCursor();
+                    
+                    // 懸停偵測 (如果在非拖曳狀態)
+                    if (!isPinching) checkHover();
+                    
                 } else {
                     document.getElementById('virtual-cursor').style.display = 'none';
                     clearHover();
@@ -337,87 +336,69 @@
             }
         }
 
-        function calculateSmoothCursor(rawX, rawY) {
-            let x = 1 - rawX; // 鏡像
-            let y = rawY;
-            // 範圍擴展 (手不用伸太長)
-            x = (x - 0.1) / 0.8; 
-            y = (y - 0.1) / 0.8;
-            x = Math.max(0, Math.min(1, x));
-            y = Math.max(0, Math.min(1, y));
+        // --- 4. 互動邏輯 (修正版) ---
+        function handleInteraction(distance) {
+            const elapsed = Date.now() - pinchStartTime;
 
-            smoothX = smoothX * 0.7 + x * 0.3; // 稍微靈敏一點
-            smoothY = smoothY * 0.7 + y * 0.3;
-        }
-
-        // --- 4. 手勢邏輯 (通用抓取 + 磁吸) ---
-        function handleGestureLogic(distance) {
-            
-            // === 狀態 A: 捏合中 (Pinched) ===
+            // === 捏合開始 ===
             if (distance < PINCH_THRESHOLD) {
-                
                 if (!isPinching) {
-                    // -> 剛開始捏合 (Touch Down)
                     isPinching = true;
                     pinchStartTime = Date.now();
                     startHandX = smoothX;
                     startScrollLeft = trackContainer.scrollLeft;
-                    isDragging = false; // 先假設不是拖曳，看之後有沒有移動
-                    
-                    // 如果是在按鈕上捏合，觸發壓下效果
+                    isDragging = false; 
+
+                    // 視覺回饋
                     if (hoveredElement) hoveredElement.classList.add('pressed');
                 }
 
-                // -> 持續捏合中
-                const elapsed = Date.now() - pinchStartTime;
+                // 判斷是否要進入拖曳模式
                 const deltaX = Math.abs(smoothX - startHandX);
 
-                // 判斷是否進入「拖曳模式」
-                // 條件：手移動超過閾值 且 沒在按長按按鈕
-                if (!isDragging && deltaX > DRAG_START_THRESHOLD) {
-                    // 如果原本磁吸在按鈕上，一但開始拖曳，就打破磁吸
-                    if (hoveredElement && hoveredElement.id !== 'btn-complete') {
-                         clearHover(); // 解除磁吸
+                // *** 關鍵修正：如果彈窗開啟 (isModalActive)，絕對禁止拖曳背景 ***
+                if (isModalActive) {
+                    isDragging = false; 
+                    // 在彈窗模式下，所有操作都視為潛在的點擊或長按
+                } else {
+                    // 只有在彈窗關閉時，才允許進入拖曳模式
+                    if (!isDragging && deltaX > DRAG_START_THRESHOLD && !hoveredElement) {
+                         isDragging = true;
                     }
-                    isDragging = true;
+                    // 特殊情況：如果一開始按在卡片上，但手滑動很大，也轉成拖曳
+                    if (hoveredElement && deltaX > DRAG_START_THRESHOLD * 2) {
+                        isDragging = true;
+                        clearHover(); // 取消點擊意圖
+                    }
                 }
 
+                // --- 執行動作 ---
                 if (isDragging) {
-                    // --- 執行拖曳 (Scroll) ---
-                    // 計算手移動的距離 -> 轉換成捲軸移動
+                    // 背景捲動
                     const moveX = (smoothX - startHandX) * window.innerWidth * SCROLL_SPEED_MULTIPLIER;
                     trackContainer.scrollLeft = startScrollLeft - moveX;
                 } else {
-                    // --- 執行長按 (Long Press Check) ---
-                    // 只有在完成按鈕上才顯示進度
+                    // 長按偵測 (僅針對完成按鈕)
                     if (hoveredElement && hoveredElement.id === 'btn-complete') {
                         const progress = Math.min((elapsed / LONG_PRESS_TIME) * 100, 100);
                         document.getElementById('btn-prog').style.width = `${progress}%`;
-                        
                         if (elapsed > LONG_PRESS_TIME) {
                             triggerAction(hoveredElement);
-                            forceRelease(); // 動作完成，強制重置
+                            forceRelease();
                         }
                     }
                 }
-
             } 
-            // === 狀態 B: 放開手指 (Released) ===
+            // === 放開手指 ===
             else if (distance > RELEASE_THRESHOLD) {
                 if (isPinching) {
-                    const elapsed = Date.now() - pinchStartTime;
-                    
-                    // 如果不是拖曳，且時間短 -> 判定為點擊 (Click)
-                    if (!isDragging && elapsed < CLICK_TIME_LIMIT) {
-                        if (hoveredElement) {
-                            triggerAction(hoveredElement);
-                        }
+                    // 判定點擊
+                    // 條件：不是拖曳狀態 且 時間夠短 且 有指到東西
+                    if (!isDragging && elapsed < CLICK_TIME_LIMIT && hoveredElement) {
+                        triggerAction(hoveredElement);
                     }
                     forceRelease();
                 }
-                
-                // 沒捏合時，持續檢查懸停 (Hover & Magnet)
-                checkHover();
             }
         }
 
@@ -429,26 +410,35 @@
             if(prog) prog.style.width = "0%";
         }
 
-        // --- 5. 懸停與磁吸邏輯 ---
+        // --- 5. 懸停與游標 ---
         function checkHover() {
-            // 注意：這裡是使用 smoothX/Y 轉換成螢幕座標進行偵測
-            // 我們需要在 renderCursor 之前就知道 hover 狀態，以便調整 cursor 位置
             const screenX = smoothX * window.innerWidth;
             const screenY = smoothY * window.innerHeight;
-
-            // 取得游標下的元素
+            
+            // 優先偵測 Modal (因為 z-index 高，elementFromPoint 會自動處理)
             const el = document.elementFromPoint(screenX, screenY);
             if (!el) return;
+            
             const interactiveEl = el.closest('.interactive');
 
             if (interactiveEl !== hoveredElement) {
                 clearHover();
                 if (interactiveEl) {
-                    interactiveEl.classList.add('magnet-target');
-                    hoveredElement = interactiveEl;
-                    magnetLocked = true;
-                } else {
-                    magnetLocked = false;
+                    // 磁吸判斷：如果是 Modal 開啟中，我們只吸附 Modal 內的按鈕
+                    // 如果 Modal 關閉，我們吸附卡片
+                    if (isModalActive) {
+                        // 確保只吸附 modal 內的元素
+                        if (document.getElementById('order-modal').contains(interactiveEl)) {
+                            interactiveEl.classList.add('magnet-target');
+                            hoveredElement = interactiveEl;
+                            magnetLocked = true;
+                        }
+                    } else {
+                        // 背景模式
+                        interactiveEl.classList.add('magnet-target');
+                        hoveredElement = interactiveEl;
+                        magnetLocked = true;
+                    }
                 }
             }
         }
@@ -462,119 +452,6 @@
             magnetLocked = false;
         }
 
-        // --- 6. 渲染游標 (包含磁吸位移) ---
         function renderCursor() {
             const cursor = document.getElementById('virtual-cursor');
-            let displayX = smoothX * window.innerWidth;
-            let displayY = smoothY * window.innerHeight;
-
-            // 樣式重置
-            cursor.className = '';
-            
-            // 優先級 1: 拖曳中 (最顯眼)
-            if (isDragging) {
-                cursor.classList.add('dragging');
-            }
-            // 優先級 2: 磁吸鎖定中 (非拖曳時)
-            else if (magnetLocked && hoveredElement) {
-                cursor.classList.add('locked');
-                
-                // 強制將游標視覺位置吸附到元件中心
-                const rect = hoveredElement.getBoundingClientRect();
-                displayX = rect.left + rect.width / 2;
-                displayY = rect.top + rect.height / 2;
-            } 
-            // 優先級 3: 捏合但未移動 (準備點擊)
-            else if (isPinching) {
-                 cursor.classList.add('locked'); // 借用鎖定樣式表示捏合
-            }
-
-            cursor.style.display = 'block';
-            cursor.style.left = `${displayX}px`;
-            cursor.style.top = `${displayY}px`;
-        }
-
-
-        // --- 7. 業務邏輯 ---
-        function triggerAction(el) {
-            const id = el.id;
-
-            if (el.classList.contains('order-card')) {
-                openOrderModal(id);
-            } 
-            else if (id === 'btn-cancel') {
-                closeModal();
-            }
-            else if (id === 'btn-complete') {
-                completeOrder();
-            }
-            
-            // 簡單的視覺回饋
-            el.style.transform = "scale(0.95)";
-            setTimeout(() => el.style.transform = "", 150);
-        }
-
-        function openOrderModal(orderId) {
-            currentModalOrder = orders.find(o => o.id === orderId);
-            if (!currentModalOrder) return;
-
-            document.getElementById('modal-title').innerText = `Table ${currentModalOrder.table}`;
-            document.getElementById('modal-time').innerText = currentModalOrder.timeStr;
-            const content = document.getElementById('modal-content');
-            content.innerHTML = currentModalOrder.items.map(it => 
-                `<div class="item-row"><span>${it.name}</span><span>${it.qty}</span></div>`
-            ).join('');
-
-            document.getElementById('order-modal').style.display = 'flex';
-            
-            // 清除之前的 hover 狀態，防止游標卡在舊的位置
-            clearHover();
-        }
-
-        function closeModal() {
-            document.getElementById('order-modal').style.display = 'none';
-            currentModalOrder = null;
-            clearHover();
-        }
-
-        function completeOrder() {
-            if (!currentModalOrder) return;
-            const orderId = currentModalOrder.id;
-            closeModal();
-
-            // 動畫
-            const card = document.getElementById(orderId);
-            if (card) {
-                const rect = card.getBoundingClientRect();
-                const flyer = document.createElement('div');
-                flyer.className = 'flying-ticket';
-                flyer.style.left = `${rect.left}px`;
-                flyer.style.top = `${rect.top}px`;
-                flyer.style.width = `${rect.width}px`;
-                flyer.style.height = `${rect.height}px`;
-                flyer.innerText = "DONE!";
-                document.body.appendChild(flyer);
-
-                const dock = document.getElementById('completed-dock');
-                const dockRect = dock.getBoundingClientRect();
-
-                requestAnimationFrame(() => {
-                    flyer.style.transform = `translate(${dockRect.left - rect.left}px, ${dockRect.top - rect.top}px) scale(0.2)`;
-                    flyer.style.opacity = '0';
-                });
-
-                orders = orders.filter(o => o.id !== orderId);
-                card.style.opacity = '0';
-                setTimeout(() => {
-                    renderOrders();
-                    flyer.remove();
-                    const mini = document.createElement('div');
-                    mini.className = 'mini-ticket';
-                    mini.innerHTML = `<span>T-${currentModalOrder.table}</span><span>Done</span>`;
-                    document.getElementById('completed-dock').prepend(mini);
-                }, 600);
-            }
-        }
-    </script>
-</body>
-</html>
+            let displayX = smoo
