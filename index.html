@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>KDS 廚房系統 (卡片定位版)</title>
+    <title>KDS 廚房系統 (流暢操作版)</title>
     <style>
         /* --- 基礎設定 --- */
         body {
@@ -27,22 +27,23 @@
             pointer-events: none; z-index: 10000;
             transform: translate(-50%, -50%); display: none;
             box-shadow: 0 0 10px rgba(0, 255, 255, 0.8);
-            transition: width 0.1s, height 0.1s, background-color 0.2s; 
+            /* 稍微加快 transition 讓手感更即時 */
+            transition: width 0.1s, height 0.1s, background-color 0.15s; 
         }
         
-        /* 鎖定狀態 (僅用於按鈕) */
+        /* 鎖定狀態 (僅用於彈窗內的按鈕) */
         #virtual-cursor.locked {
             width: 16px; height: 16px;
             background-color: #ff0055;
-            box-shadow: 0 0 15px #ff0055;
+            box-shadow: 0 0 20px #ff0055;
             border-color: #ffcccc;
         }
 
-        /* 拖曳狀態 */
+        /* 拖曳狀態 (捲動時) */
         #virtual-cursor.dragging {
-            width: 40px; height: 40px;
-            background-color: rgba(255, 255, 255, 0.5);
-            border: none;
+            width: 36px; height: 36px;
+            background-color: rgba(255, 255, 255, 0.4);
+            border: 2px solid rgba(255,255,255,0.8);
         }
 
         /* --- 頂部狀態列 --- */
@@ -61,32 +62,33 @@
             position: relative;
             cursor: grab;
             display: flex;
-            align-items: center; /* 垂直置中 */
+            align-items: center;
         }
 
         #orders-track {
             display: flex; 
             align-items: center; 
-            gap: 40px; /* 卡片間距 */
-            padding: 0 50vw; /* 讓第一張和最後一張能置中，動態計算 */
+            gap: 40px; 
+            padding: 0 50vw; /* 動態計算 */
             width: max-content; 
-            /* 關鍵：初始不設 transition，拖曳時才流暢，放開時加回 transition */
+            /* 預設無 transition，由 JS 控制 snap 動畫 */
         }
 
         /* --- 訂單卡片 --- */
         .order-card {
-            min-width: 320px; height: 480px; /* 卡片做大一點，方便看 */
+            min-width: 320px; height: 480px;
             background: #fff; color: #333;
             border-radius: 16px;
             display: flex; flex-direction: column;
             position: relative;
-            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s;
+            transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1), box-shadow 0.3s, opacity 0.3s, filter 0.2s;
             border-top: 10px solid #ccc;
             user-select: none;
-            opacity: 0.5; /* 非焦點卡片變暗 */
+            opacity: 0.5; 
             transform: scale(0.9);
         }
-        /* 焦點卡片樣式 */
+        
+        /* 位於中間的卡片 */
         .order-card.focused {
             opacity: 1;
             transform: scale(1);
@@ -98,9 +100,9 @@
         .order-card.priority-mid { border-top-color: #ffc107; }
         .order-card.priority-high { border-top-color: #dc3545; }
 
-        /* 卡片懸停 (不移動位置，只變亮，避免干擾捲動) */
+        /* 卡片懸停 (僅視覺變亮，不吸附) */
         .order-card.hover-highlight {
-            filter: brightness(1.1);
+            filter: brightness(1.15); /* 稍微變亮提示可點 */
         }
         
         .order-card.pressed { filter: brightness(0.9); transform: scale(0.98); }
@@ -144,7 +146,7 @@
         .btn-close { flex: 1; background: #e9ecef; color: #333; }
         .btn-complete { flex: 2; background: #28a745; color: white; font-weight: bold; }
         
-        /* 按鈕磁吸樣式 */
+        /* 磁吸樣式 (僅按鈕) */
         .btn-close.magnet-target, .btn-complete.magnet-target {
             z-index: 2; box-shadow: inset 0 0 0 5px rgba(0, 255, 255, 0.8);
         }
@@ -171,20 +173,19 @@
 <body>
 
     <header>
-        <div style="font-size: 24px; font-weight: bold;">🧑‍🍳 KDS 廚房系統 (Snap View)</div>
+        <div style="font-size: 24px; font-weight: bold;">🧑‍🍳 KDS 廚房系統 (極致流暢版)</div>
         <div class="status-box">
             <div id="status-text">初始化...</div>
             <div class="dot" id="status-dot"></div>
         </div>
     </header>
 
-    <!-- 背景訂單區 -->
     <div id="orders-track-container">
         <div id="orders-track"></div>
     </div>
     
     <div class="hint-overlay">
-        ✊ 抓取左右滑動切換訂單 &nbsp;|&nbsp; 👌 輕點開啟詳情
+        ✊ 抓取左右滑動 &nbsp;|&nbsp; 👌 輕點開啟 &nbsp;|&nbsp; 彈窗內按鈕具備磁吸功能
     </div>
 
     <div id="completed-dock">
@@ -203,7 +204,7 @@
                 <button class="btn-close interactive" id="btn-cancel">返回</button>
                 <button class="btn-complete interactive" id="btn-complete">
                     <div class="btn-progress" id="btn-prog"></div>
-                    <span>出餐 (長捏)</span>
+                    <span>長捏出餐</span>
                 </button>
             </div>
         </div>
@@ -220,19 +221,20 @@
         // --- 參數 ---
         const PINCH_THRESHOLD = 0.06;
         const RELEASE_THRESHOLD = 0.1;
-        const DRAG_START_THRESHOLD = 0.015; 
-        const CLICK_TIME_LIMIT = 300; 
+        const DRAG_START_THRESHOLD = 0.01; // 降低拖曳啟動門檻，讓滑動更靈敏
+        const SCROLL_SPEED_MULTIPLIER = 1.6; 
+        const CLICK_TIME_LIMIT = 500; // 500ms 內的捏合都算點擊
         const LONG_PRESS_TIME = 800;
 
         // 捲動參數
-        const CARD_WIDTH = 320; // 卡片寬度
-        const CARD_GAP = 40;    // 卡片間距
+        const CARD_WIDTH = 320; 
+        const CARD_GAP = 40;    
         const TOTAL_ITEM_WIDTH = CARD_WIDTH + CARD_GAP;
         
         // --- 狀態 ---
         let orders = [];
         let currentModalOrder = null;
-        let isModalActive = false;
+        let isModalActive = false; // 彈窗是否開啟
 
         let smoothX = 0.5, smoothY = 0.5;
         let isPinching = false;
@@ -241,10 +243,10 @@
         let startHandX = 0;
         let startScrollLeft = 0;
         let isDragging = false;
-        let currentIndex = 0; // 目前顯示第幾張訂單 (0-based)
+        let currentIndex = 0; 
 
         let hoveredElement = null;
-        let magnetLocked = false;
+        let magnetLocked = false; // 是否鎖定游標位置 (磁吸)
 
         const track = document.getElementById('orders-track');
         const trackContainer = document.getElementById('orders-track-container');
@@ -274,8 +276,7 @@
             track.innerHTML = '';
             orders.sort((a, b) => a.timestamp - b.timestamp);
             
-            // 設定 Padding 讓第一張卡片可以置中
-            // container width / 2 - card width / 2
+            // 讓第一張卡片置中的 Padding
             const centerPadding = (window.innerWidth / 2) - (CARD_WIDTH / 2);
             track.style.paddingLeft = `${centerPadding}px`;
             track.style.paddingRight = `${centerPadding}px`;
@@ -290,9 +291,8 @@
                 
                 const card = document.createElement('div');
                 card.className = `order-card interactive ${priorityClass}`;
-                if (index === 0) card.classList.add('focused'); // 預設聚焦第一張
+                if (index === 0) card.classList.add('focused');
                 card.id = order.id;
-                card.dataset.index = index; // 存 index 方便計算
                 card.innerHTML = `
                     <div class="card-header"><span class="table-num">${order.table}</span><span class="timer">${order.timeStr}</span></div>
                     <div class="card-body">${itemsHtml}</div>
@@ -302,14 +302,12 @@
             });
         }
 
-        // --- 2. 軌道位置控制 (核心: 卡片定位) ---
+        // --- 2. 軌道定位控制 ---
         function updateTrackPosition(index, animate = true) {
-            // 限制 index 範圍
             if (index < 0) index = 0;
             if (index >= orders.length) index = orders.length - 1;
             currentIndex = index;
 
-            // 計算目標 scrollLeft
             const targetScroll = index * TOTAL_ITEM_WIDTH;
 
             if (animate) {
@@ -318,7 +316,6 @@
                 trackContainer.scrollLeft = targetScroll;
             }
 
-            // 更新卡片樣式 (聚焦效果)
             document.querySelectorAll('.order-card').forEach((card, i) => {
                 if (i === currentIndex) card.classList.add('focused');
                 else card.classList.remove('focused');
@@ -364,8 +361,11 @@
                     x = (x - 0.1) / 0.8; y = (y - 0.1) / 0.8;
                     x = Math.max(0, Math.min(1, x)); y = Math.max(0, Math.min(1, y));
                     
-                    smoothX = smoothX * 0.7 + x * 0.3;
-                    smoothY = smoothY * 0.7 + y * 0.3;
+                    // 動態平滑係數：Modal 開啟時讓游標更穩 (平滑係數大)
+                    const factor = isModalActive ? 0.85 : 0.7; 
+                    
+                    smoothX = smoothX * factor + x * (1 - factor);
+                    smoothY = smoothY * factor + y * (1 - factor);
 
                     handleInteraction(pinchDist);
                     renderCursor();
@@ -378,7 +378,7 @@
             }
         }
 
-        // --- 5. 互動邏輯 (Snap Scroll) ---
+        // --- 5. 互動邏輯 ---
         function handleInteraction(distance) {
             const elapsed = Date.now() - pinchStartTime;
 
@@ -388,38 +388,20 @@
                     isPinching = true;
                     pinchStartTime = Date.now();
                     startHandX = smoothX;
+                    startScrollLeft = trackContainer.scrollLeft;
                     
-                    // 紀錄開始拖曳時的基準點 (以目前卡片位置為準)
-                    startScrollLeft = currentIndex * TOTAL_ITEM_WIDTH;
-                    
-                    isDragging = false; 
-                    if (hoveredElement) hoveredElement.classList.add('pressed');
-                }
-
-                const deltaX = Math.abs(smoothX - startHandX);
-
-                if (isModalActive) {
-                    // Modal 開啟時，禁止背景捲動
-                    isDragging = false;
-                } else {
-                    if (!isDragging && deltaX > DRAG_START_THRESHOLD) {
-                         isDragging = true;
-                         // 開始拖曳時，移除所有磁吸
-                         if (hoveredElement) {
-                             hoveredElement.classList.remove('pressed');
-                             hoveredElement.classList.remove('magnet-target');
-                             hoveredElement = null;
-                         }
+                    // 若在 Modal 開啟時捏合，直接給予反饋 (因為不做拖曳)
+                    if (isModalActive && hoveredElement) {
+                        hoveredElement.classList.add('pressed'); // 視覺反饋
                     }
                 }
 
-                if (isDragging) {
-                    // --- 拖曳模式 (跟手) ---
-                    // 增加一點靈敏度 (Multiplier 2.5)
-                    const movePixel = (smoothX - startHandX) * window.innerWidth * 2.5;
-                    trackContainer.scrollLeft = startScrollLeft - movePixel;
-                } else {
-                    // --- 長按偵測 (Modal 內) ---
+                if (isModalActive) {
+                    // --- Modal 模式：純點擊/長按 (不拖曳) ---
+                    // 不執行拖曳判定，所有捏合都視為對當前 hover 元素的操作
+                    isDragging = false; 
+
+                    // 長按偵測
                     if (hoveredElement && hoveredElement.id === 'btn-complete') {
                         const progress = Math.min((elapsed / LONG_PRESS_TIME) * 100, 100);
                         document.getElementById('btn-prog').style.width = `${progress}%`;
@@ -428,33 +410,45 @@
                             forceRelease();
                         }
                     }
+                } else {
+                    // --- 背景模式：拖曳 ---
+                    const deltaX = Math.abs(smoothX - startHandX);
+                    if (!isDragging && deltaX > DRAG_START_THRESHOLD) {
+                        isDragging = true;
+                    }
+                    if (isDragging) {
+                        const movePixel = (smoothX - startHandX) * window.innerWidth * SCROLL_SPEED_MULTIPLIER;
+                        trackContainer.scrollLeft = startScrollLeft - movePixel;
+                    }
                 }
             } 
             // === 放開手指 ===
             else if (distance > RELEASE_THRESHOLD) {
                 if (isPinching) {
-                    if (isDragging) {
-                        // --- 拖曳結束：計算要 Snap 到哪一張卡片 ---
-                        // 目前的 scrollLeft
-                        const finalScrollLeft = trackContainer.scrollLeft;
-                        // 計算最接近的 index
-                        const rawIndex = finalScrollLeft / TOTAL_ITEM_WIDTH;
-                        let targetIndex = Math.round(rawIndex);
-
-                        // 慣性優化：如果手勢滑動很快，可以強制切換上一張或下一張
-                        // 這裡簡單實作：看手勢位移方向
-                        const gestureDelta = smoothX - startHandX;
-                        if (gestureDelta > 0.05) { // 往右滑 (Previous)
-                            targetIndex = Math.floor(rawIndex);
-                        } else if (gestureDelta < -0.05) { // 往左滑 (Next)
-                            targetIndex = Math.ceil(rawIndex);
+                    if (isModalActive) {
+                        // --- Modal 模式：放開即點擊 ---
+                        // 只要還指著該按鈕，就觸發 (不管時間多長，只要沒超過長按觸發)
+                        if (hoveredElement && elapsed < LONG_PRESS_TIME + 200) {
+                            triggerAction(hoveredElement);
                         }
+                    } else {
+                        // --- 背景模式：Snap Scroll ---
+                        if (isDragging) {
+                            // 計算最近的訂單索引
+                            const finalScrollLeft = trackContainer.scrollLeft;
+                            const rawIndex = finalScrollLeft / TOTAL_ITEM_WIDTH;
+                            let targetIndex = Math.round(rawIndex);
 
-                        updateTrackPosition(targetIndex, true);
-                    } 
-                    else if (elapsed < CLICK_TIME_LIMIT && hoveredElement) {
-                        // --- 點擊 ---
-                        triggerAction(hoveredElement);
+                            // 慣性小優化
+                            const gestureDelta = smoothX - startHandX;
+                            if (gestureDelta > 0.05) targetIndex = Math.floor(rawIndex);
+                            else if (gestureDelta < -0.05) targetIndex = Math.ceil(rawIndex);
+
+                            updateTrackPosition(targetIndex, true);
+                        } else if (elapsed < CLICK_TIME_LIMIT && hoveredElement) {
+                            // 沒拖曳，算點擊卡片
+                            triggerAction(hoveredElement);
+                        }
                     }
                     forceRelease();
                 }
@@ -464,12 +458,13 @@
         function forceRelease() {
             isPinching = false;
             isDragging = false;
-            if (hoveredElement) hoveredElement.classList.remove('pressed');
+            // 清除按鈕按壓狀態
+            document.querySelectorAll('.interactive').forEach(el => el.classList.remove('pressed'));
             const prog = document.getElementById('btn-prog');
             if(prog) prog.style.width = "0%";
         }
 
-        // --- 6. 懸停與磁吸 ---
+        // --- 6. 懸停偵測 (分模式) ---
         function checkHover() {
             const screenX = smoothX * window.innerWidth;
             const screenY = smoothY * window.innerHeight;
@@ -482,18 +477,18 @@
                 clearHover();
                 if (interactiveEl) {
                     if (isModalActive) {
-                        // Modal 模式：只吸附按鈕
+                        // Modal 模式：只吸附 modal 內的元素
                         if (document.getElementById('order-modal').contains(interactiveEl)) {
                             interactiveEl.classList.add('magnet-target');
                             hoveredElement = interactiveEl;
-                            magnetLocked = true;
+                            magnetLocked = true; // 鎖定位置
                         }
                     } else {
-                        // 背景模式：訂單卡片「不吸附」，只變亮 (hover-highlight)
+                        // 背景模式：訂單卡片「不吸附」，只變亮
                         if (interactiveEl.classList.contains('order-card')) {
                             interactiveEl.classList.add('hover-highlight');
                             hoveredElement = interactiveEl;
-                            magnetLocked = false; // 關鍵：不鎖定游標位置
+                            magnetLocked = false; // 游標自由
                         }
                     }
                 }
@@ -520,6 +515,7 @@
             if (isDragging) {
                 cursor.classList.add('dragging');
             } else if (magnetLocked && hoveredElement) {
+                // 只有磁吸鎖定時，游標位置才被強制吸附
                 cursor.classList.add('locked');
                 const rect = hoveredElement.getBoundingClientRect();
                 displayX = rect.left + rect.width / 2;
@@ -531,13 +527,17 @@
             cursor.style.top = `${displayY}px`;
         }
 
-        // --- 7. 業務邏輯 ---
+        // --- 7. 業務動作 ---
         function triggerAction(el) {
             const id = el.id;
             if (el.classList.contains('order-card')) {
-                // 只有點擊當前聚焦的卡片才有效，或者點擊任意卡片都會自動捲過去？
-                // 這裡設計：點擊即開啟
-                openModal(id);
+                // 如果點的是旁邊的卡片，先捲過去
+                const targetIndex = orders.findIndex(o => o.id === id);
+                if (targetIndex !== currentIndex) {
+                    updateTrackPosition(targetIndex, true);
+                } else {
+                    openModal(id);
+                }
             } 
             else if (id === 'btn-cancel') closeModal();
             else if (id === 'btn-complete') completeOrder();
@@ -547,13 +547,6 @@
         }
 
         function openModal(id) {
-            const targetIndex = orders.findIndex(o => o.id === id);
-            // 如果點選的不是當前中間的，先捲過去，不開啟
-            if (targetIndex !== currentIndex) {
-                updateTrackPosition(targetIndex, true);
-                return;
-            }
-
             currentModalOrder = orders.find(o => o.id === id);
             if (!currentModalOrder) return;
             
@@ -564,7 +557,8 @@
 
             document.getElementById('order-modal').style.display = 'flex';
             isModalActive = true; 
-            forceRelease();
+            clearHover(); 
+            // 讓游標稍微穩一點，方便點擊
         }
 
         function closeModal() {
@@ -603,10 +597,8 @@
                 card.style.opacity = '0';
                 setTimeout(() => {
                     renderOrders();
-                    // 移除後，重新對齊當前 index (如果有變動)
                     if (currentIndex >= orders.length) currentIndex = orders.length - 1;
                     updateTrackPosition(currentIndex, false);
-                    
                     flyer.remove();
                     const mini = document.createElement('div');
                     mini.className = 'mini-ticket';
