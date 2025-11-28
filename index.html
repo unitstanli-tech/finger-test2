@@ -454,4 +454,107 @@
 
         function renderCursor() {
             const cursor = document.getElementById('virtual-cursor');
-            let displayX = smoo
+            let displayX = smoothX * window.innerWidth;
+            let displayY = smoothY * window.innerHeight;
+
+            cursor.className = ''; 
+            
+            if (isDragging) {
+                cursor.classList.add('dragging');
+            } else if (magnetLocked && hoveredElement) {
+                cursor.classList.add('locked');
+                const rect = hoveredElement.getBoundingClientRect();
+                displayX = rect.left + rect.width / 2;
+                displayY = rect.top + rect.height / 2;
+            }
+
+            cursor.style.display = 'block';
+            cursor.style.left = `${displayX}px`;
+            cursor.style.top = `${displayY}px`;
+        }
+
+        // --- 6. 業務邏輯 ---
+        function triggerAction(el) {
+            const id = el.id;
+
+            if (el.classList.contains('order-card')) {
+                openModal(id);
+            } 
+            else if (id === 'btn-cancel') {
+                closeModal();
+            }
+            else if (id === 'btn-complete') {
+                completeOrder();
+            }
+            
+            // 點擊動畫
+            el.style.transform = "scale(0.95)";
+            setTimeout(() => el.style.transform = "", 150);
+        }
+
+        function openModal(id) {
+            currentModalOrder = orders.find(o => o.id === id);
+            if (!currentModalOrder) return;
+            
+            // 填充資料
+            document.getElementById('modal-title').innerText = `Table ${currentModalOrder.table}`;
+            document.getElementById('modal-time').innerText = currentModalOrder.timeStr;
+            const content = document.getElementById('modal-content');
+            content.innerHTML = currentModalOrder.items.map(it => `<div class="item-row"><span>${it.name}</span><span>${it.qty}</span></div>`).join('');
+
+            // 開啟 Modal 並設定鎖定狀態
+            document.getElementById('order-modal').style.display = 'flex';
+            isModalActive = true; 
+            
+            // 重置狀態以防萬一
+            forceRelease();
+        }
+
+        function closeModal() {
+            document.getElementById('order-modal').style.display = 'none';
+            isModalActive = false; // 解除鎖定，允許捲動
+            currentModalOrder = null;
+            clearHover();
+        }
+
+        function completeOrder() {
+            if (!currentModalOrder) return;
+            const orderId = currentModalOrder.id;
+            closeModal(); // 這裡會順便把 isModalActive 設為 false
+
+            // 動畫
+            const card = document.getElementById(orderId);
+            if (card) {
+                const rect = card.getBoundingClientRect();
+                const flyer = document.createElement('div');
+                flyer.className = 'flying-ticket';
+                flyer.style.left = `${rect.left}px`;
+                flyer.style.top = `${rect.top}px`;
+                flyer.style.width = `${rect.width}px`;
+                flyer.style.height = `${rect.height}px`;
+                flyer.innerText = "DONE!";
+                document.body.appendChild(flyer);
+
+                const dock = document.getElementById('completed-dock');
+                const dockRect = dock.getBoundingClientRect();
+
+                requestAnimationFrame(() => {
+                    flyer.style.transform = `translate(${dockRect.left - rect.left}px, ${dockRect.top - rect.top}px) scale(0.2)`;
+                    flyer.style.opacity = '0';
+                });
+
+                orders = orders.filter(o => o.id !== orderId);
+                card.style.opacity = '0';
+                setTimeout(() => {
+                    renderOrders();
+                    flyer.remove();
+                    const mini = document.createElement('div');
+                    mini.className = 'mini-ticket';
+                    mini.innerHTML = `<span>T-${currentModalOrder.table}</span><span>Done</span>`;
+                    document.getElementById('completed-dock').prepend(mini);
+                }, 600);
+            }
+        }
+    </script>
+</body>
+</html>
