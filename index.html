@@ -475,4 +475,144 @@
                 if (pinchTriggered) return;
                 if (pinchStartTime === 0) pinchStartTime = Date.now();
 
+                const elapsed = Date.now() - pinchStartTime;
+                const progress = Math.min((elapsed / HOLD_TIME) * 100, 100);
+
+                // 更新上方指示器
+                mainBar.style.width = `${progress}%`;
+                
+                // 如果正指著完成按鈕，也更新按鈕內的進度條
+                if (hoveredElement && hoveredElement.id === 'btn-complete') {
+                    btnProg.style.width = `${progress}%`;
+                }
+
+                if (elapsed > HOLD_TIME) {
+                    triggerAction();
+                    pinchTriggered = true;
+                    // Reset UI
+                    mainBar.style.width = "0%";
+                    if (btnProg) btnProg.style.width = "0%";
+                }
+            } else {
+                // 只有張開到一定程度才算重置
+                if (distance > LOCK_THRESHOLD) {
+                    pinchTriggered = false;
+                    pinchStartTime = 0;
+                    mainBar.style.width = "0%";
+                    if (btnProg) btnProg.style.width = "0%";
+                }
+            }
+        }
+
+        function triggerAction() {
+            if (!hoveredElement) return;
+
+            const id = hoveredElement.id;
+
+            if (hoveredElement.classList.contains('order-card')) {
+                openOrderModal(id);
+            } 
+            else if (id === 'btn-cancel') {
+                closeModal();
+            }
+            else if (id === 'btn-complete') {
+                completeOrder();
+            }
+
+            // 觸發視覺回饋
+            hoveredElement.classList.add('active');
+            setTimeout(() => hoveredElement.classList.remove('active'), 200);
+        }
+
+        // --- 6. 業務邏輯 (Modal & Complete) ---
+        function openOrderModal(orderId) {
+            currentModalOrder = orders.find(o => o.id === orderId);
+            if (!currentModalOrder) return;
+
+            document.getElementById('modal-title').innerText = `桌號 ${currentModalOrder.table}`;
+            document.getElementById('modal-time').innerText = currentModalOrder.timeStr;
             
+            const content = document.getElementById('modal-content');
+            content.innerHTML = currentModalOrder.items.map(it => 
+                `<div class="modal-item-row"><span>${it.name}</span><span>${it.qty}</span></div>`
+            ).join('');
+
+            document.getElementById('order-modal').style.display = 'flex';
+            // 暫停一下輸入，避免馬上觸發關閉
+            tempPauseInput();
+        }
+
+        function closeModal() {
+            document.getElementById('order-modal').style.display = 'none';
+            currentModalOrder = null;
+            tempPauseInput();
+        }
+
+        function completeOrder() {
+            if (!currentModalOrder) return;
+
+            const orderId = currentModalOrder.id;
+            
+            // A. 關閉視窗
+            closeModal();
+
+            // B. 執行動畫 (飛向完成區)
+            const card = document.getElementById(orderId);
+            if (card) {
+                const rect = card.getBoundingClientRect();
+                const flyer = document.createElement('div');
+                flyer.className = 'flying-ticket';
+                flyer.style.left = `${rect.left}px`;
+                flyer.style.top = `${rect.top}px`;
+                flyer.style.width = `${rect.width}px`;
+                flyer.style.height = `${rect.height}px`;
+                flyer.innerText = "COMPLETED!";
+                document.body.appendChild(flyer);
+
+                // 目標位置 (完成區)
+                const dock = document.getElementById('completed-dock');
+                const dockRect = dock.getBoundingClientRect();
+
+                requestAnimationFrame(() => {
+                    flyer.style.transform = `translate(${dockRect.left - rect.left}px, ${dockRect.top - rect.top}px) scale(0.2)`;
+                    flyer.style.opacity = '0';
+                });
+
+                // C. 資料移動
+                orders = orders.filter(o => o.id !== orderId);
+                completedOrders.push(currentModalOrder);
+                
+                // D. 移除 DOM
+                card.style.opacity = '0'; // 先隱藏原卡片
+                setTimeout(() => {
+                    renderOrders(); // 重新渲染列表
+                    flyer.remove();
+                    addMiniTicket(currentModalOrder.table);
+                }, 600);
+            }
+        }
+
+        function addMiniTicket(tableNum) {
+            const dock = document.getElementById('completed-dock');
+            const mini = document.createElement('div');
+            mini.className = 'mini-ticket';
+            mini.innerHTML = `<span>Table</span><span style="font-size:20px; font-weight:bold">${tableNum}</span>`;
+            dock.prepend(mini); // 加在最前面
+        }
+
+        function tempPauseInput() {
+            isInputPaused = true;
+            // 清除鎖定狀態以免卡住
+            isCursorLocked = false;
+            pinchStartTime = 0;
+            if (hoveredElement) hoveredElement.classList.remove('magnet-locked');
+            hoveredElement = null;
+
+            setTimeout(() => {
+                isInputPaused = false;
+            }, 500);
+        }
+
+    </script>
+</body>
+</html>
